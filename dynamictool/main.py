@@ -27,6 +27,8 @@ from fastapi import Query
 import pint
 import math
 import logging
+from fastapi.middleware.cors import CORSMiddleware
+
 # ✅ Use `lifespan` to ensure tables are created
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +38,16 @@ async def lifespan(app: FastAPI):
 
 # ✅ Initialize FastAPI app with lifespan event
 app = FastAPI(lifespan=lifespan)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000","https://gas-analyze.vercel.app/"],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
+
 
 @app.get("/")
 async def read_root():
@@ -517,7 +529,7 @@ async def update_gas_composition(
 
 
 @app.get("/projects/{project_id}/gas_compositions3")
-async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db)):
+async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db),user: dict = Depends(get_current_user)):
     try:
         # Asynchronous query to get Project, Case, and GasComposition details based on project_id
         stmt = select(Project).filter(Project.project_id == project_id).options(
@@ -605,7 +617,7 @@ async def update_inlet_condition(
 
 
 @app.get("/projects/{project_id}/inlet_conditions")
-async def get_inlet_conditions(project_id: int, db: AsyncSession = Depends(get_db)):
+async def get_inlet_conditions(project_id: int, db: AsyncSession = Depends(get_db),user: dict = Depends(get_current_user)):
     # Perform the query asynchronously
     stmt = (
         select(Project)
