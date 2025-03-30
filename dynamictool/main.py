@@ -514,6 +514,53 @@ async def update_gas_composition(
     await db.commit()
     return {"message": "Gas composition updated successfully"}
 
+@app.get("/projects/{project_id}/gas_compositions3")
+async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        # Asynchronous query to get Project, Case, and GasComposition details based on project_id
+        stmt = select(Project).filter(Project.project_id == project_id).options(
+            selectinload(Project.cases).selectinload(Case.gas_compositions)
+        )
+
+        # Execute the query asynchronously
+        result = await db.execute(stmt)
+        project_data = result.scalars().first()
+
+        if not project_data:
+            raise HTTPException(status_code=404, detail="No data found for the provided project ID")
+
+        # Prepare the response in the required format
+        project_response = {
+            "project_id": project_data.project_id,
+            "name": project_data.name,
+            "description": project_data.description,
+            "cases": []
+        }
+
+        # Collect cases and their respective gas compositions
+        for case in project_data.cases:
+            case_data = {
+                "case_id": case.case_id,
+                "case_number": case.case_number,
+                "gas_compositions": []
+            }
+
+            # Collect all gas compositions for each case
+            for gas_composition in case.gas_compositions:
+                gas_composition_data = {
+                    "gas_composition_id": gas_composition.id,
+                    "sequence_number": gas_composition.sequence_number,
+                    "amount": gas_composition.amount,
+                    "unit": gas_composition.unit
+                }
+                case_data["gas_compositions"].append(gas_composition_data)
+
+            project_response["cases"].append(case_data)
+
+        return {"projects": [project_response]}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 
@@ -555,150 +602,66 @@ async def update_inlet_condition(
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 
+@app.get("/projects/{project_id}/inlet_conditions")
+async def get_inlet_conditions(project_id: int, db: AsyncSession = Depends(get_db)):
+    # Perform the query asynchronously
+    stmt = (
+        select(Project)
+        .filter(Project.project_id == project_id)
+        .options(
+            selectinload(Project.cases)
+            .selectinload(Case.inlet_conditions)  # Load inlet_conditions along with cases
+        )
+    )
+    result = await db.execute(stmt)
+    projects = result.scalars().all()
+
+    response = []
+    for project in projects:
+        project_data = {
+            "project_id": project.project_id,
+            "name": project.name,
+            "description": project.description,
+            "cases": []
+        }
+
+        for case in project.cases:
+            case_data = {
+                "case_id": case.case_id,
+                "case_number": case.case_number,
+                "inlet_conditions": []
+            }
+
+            for inlet_condition in case.inlet_conditions:
+                inlet_condition_data = {
+                    "inlet_condition_id": inlet_condition.id,
+                    "description": inlet_condition.description,
+                    "ambient_pressure": inlet_condition.ambient_pressure,
+                    "ambient_pressure_unit": inlet_condition.ambient_pressure_unit,
+                    "ambient_temperature": inlet_condition.ambient_temperature,
+                    "ambient_temperature_unit": inlet_condition.ambient_temperature_unit,
+                    "guarantee_point": inlet_condition.guarantee_point,
+                    "suppress": inlet_condition.suppress,
+                    "pressure": inlet_condition.pressure,
+                    "pressure_unit": inlet_condition.pressure_unit,
+                    "temperature": inlet_condition.temperature,
+                    "temperature_unit": inlet_condition.temperature_unit,
+                    "flow_type": inlet_condition.flow_type,
+                    "flow_value": inlet_condition.flow_value,
+                    "flow_unit": inlet_condition.flow_unit
+                }
+                case_data["inlet_conditions"].append(inlet_condition_data)
+
+            project_data["cases"].append(case_data)
+
+        response.append(project_data)
+
+    return {"projects": response}
+
+
+
 #----------------------------------------------- Selected_Component-----------------------------------
 
-# # ✅ API: Select a Gas
-# @app.post("/user/component-select/", response_model=List[ComponentResponse])
-# async def select_gas(
-#     request: ComponentSelectRequest,
-#     db: AsyncSession = Depends(get_db)
-# ):
-#     # 1️⃣ Check if the gas exists
-#     result = await db.execute(select(Gas).where(Gas.name == request.gas_name))
-#     gas = result.scalars().first()
-
-#     if not gas:
-#         raise HTTPException(status_code=404, detail="Gas not found")
-
-#     # 2️⃣ Check if the gas is already selected for the project
-#     existing_selection = await db.execute(
-#         select(SelectedComponent).where(
-#             SelectedComponent.gas_name == request.gas_name,
-#             SelectedComponent.project_id == request.project_id
-#         )
-#     )
-#     if existing_selection.scalars().first():
-#         raise HTTPException(status_code=400, detail="Gas already selected")
-
-#     # 3️⃣ Get the next sequence number for the project
-#     last_sequence = await db.execute(
-#         select(SelectedComponent.sequence_number)
-#         .where(SelectedComponent.project_id == request.project_id)
-#         .order_by(SelectedComponent.sequence_number.desc())
-#     )
-#     last_sequence_number = last_sequence.scalars().first() or 0
-#     new_sequence_number = last_sequence_number + 1
-
-#     # 4️⃣ Insert into SelectedComponent table
-#     new_selection = SelectedComponent(
-#         project_id=request.project_id,
-#         gas_name=request.gas_name,
-#         sequence_number=new_sequence_number
-#     )
-#     db.add(new_selection)
-#     await db.commit()
-
-#     selected_result = await db.execute(
-#         select(Gas.gas_id, Gas.name, SelectedComponent.sequence_number)
-#         .join(SelectedComponent, Gas.name == SelectedComponent.gas_name)  # Ensure correct join condition
-#         .where(SelectedComponent.project_id == request.project_id)
-#         .order_by(SelectedComponent.sequence_number)
-#     )
-#     selected_components = selected_result.all()
-
-#     return [{"gas_id": g[0], "name": g[1], "sequence_number": g[2]} for g in selected_components]
-
-
-
-
-# # ✅ API: Remove a Gas
-# @app.delete("/user/gases-remove/", response_model=List[dict])
-# async def remove_gas(
-#     request: GasRemoveRequest,
-#     db: AsyncSession = Depends(get_db)
-# ):  
-#     # 1️⃣ Check if the gas is in the user's selection
-#     existing_selection = await db.execute(
-#         select(SelectedGas).where(
-#             SelectedGas.gas_name == request.gas_name,
-#             SelectedGas.user_id == request.user_id
-#         )
-#     )
-#     selected_gas = existing_selection.scalars().first()
-
-#     if not selected_gas:
-#         raise HTTPException(status_code=404, detail="Gas not found in selection")
-
-#     # 2️⃣ Remove the selected gas
-#     await db.delete(selected_gas)
-#     await db.commit()
-
-#     # 3️⃣ Fetch updated selected gases for the user
-#     selected_result = await db.execute(
-#         select(Gas).join(SelectedGas).where(SelectedGas.user_id == request.user_id)
-#     )
-#     selected_gases = selected_result.scalars().all()
-
-#     return [{"gas_id": g.gas_id, "name": g.name} for g in selected_gases]
-
-
-
-@app.post("/user/CaseRequiredParameters/")
-async def create_case(
-    project_id: int,
-    inlet_conditions: list[InletConditionCreate],
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user)  # Ensure user is logged in
-):
-    # ✅ Check if the project belongs to the logged-in user
-    project = await db.execute(
-        select(Project).where(Project.project_id == project_id, Project.user_id == user["id"])
-    )
-    project = project.scalars().first()
-    
-    if not project:
-        raise HTTPException(
-            status_code=403,
-            detail="This project does not belong to the logged-in user. Select or enter the correct project."
-        )
-
-    # ✅ Get the current highest case number for the project
-    result = await db.execute(select(Case).where(Case.project_id == project_id))
-    existing_cases = result.scalars().all()
-    next_case_number = len(existing_cases) + 1
-
-    # ✅ Create new case
-    new_case = Case(
-        name=f"Case {next_case_number}",
-        project_id=project_id,
-        is_default=False
-    )
-    db.add(new_case)
-    await db.flush()  # Get new case_id
-
-    # ✅ Insert Inlet Conditions
-    for inlet in inlet_conditions:
-        db.add(InletCondition(
-            project_id=project_id,
-            case_id=new_case.case_id,
-            description=inlet.description,
-            ambient_pressure=inlet.ambient_pressure,
-            ambient_pressure_unit=inlet.ambient_pressure_unit,
-            ambient_temperature=inlet.ambient_temperature,
-            ambient_temperature_unit=inlet.ambient_temperature_unit,
-            guarantee_point=inlet.guarantee_point,
-            suppress=inlet.suppress,
-            pressure=inlet.pressure,
-            pressure_unit=inlet.pressure_unit,
-            temperature=inlet.temperature,
-            temperature_unit=inlet.temperature_unit,
-            flow_type=inlet.flow_type,
-            flow_value=inlet.flow_value,
-            flow_unit=inlet.flow_unit
-        ))
-
-    await db.commit()
-    return {"message": "Case created successfully", "case_id": new_case.case_id}
 
 #--------------------------------------------------------------Calculation----------------------------------------------------
 # Initialize the Unit Registry
@@ -945,83 +908,58 @@ async def calculate_properties(
 
 
 
-# @app.get("/projects-details/")
-# async def get_project(
-#     project_id: int = None, 
-#     name: str = None,  
-#     db: AsyncSession = Depends(get_db),
-#     user: dict = Depends(get_current_user)
-# ):
-#     if not project_id and not name:
-#         raise HTTPException(status_code=400, detail="Provide either project_id or name")
+@app.get("/projects/{project_id}/calculated_properties")
+async def get_calculated_properties(project_id: int, db: AsyncSession = Depends(get_db)):
+    # Perform the query asynchronously
+    stmt = (
+        select(Project)
+        .filter(Project.project_id == project_id)
+        .options(
+            selectinload(Project.cases)
+            .selectinload(Case.calculated_properties)  # Load calculated_properties along with cases
+        )
+    )
+    result = await db.execute(stmt)
+    projects = result.scalars().all()
 
-#     # ✅ Fetch Project with Cases, Components, and Inlets properly nested
-#     stmt = (
-#         select(Project)
-#         .filter(
-#             Project.user_id == user["id"],
-#             or_(Project.project_id == project_id, Project.name == name)
-#         )
-#         .options(
-#             joinedload(Project.cases)
-#                 .joinedload(Case.selected_components_composition)
-#                 .joinedload(SelectedComponentGasComposition.gas),  # ✅ Load Gas details under each Case
-#             joinedload(Project.cases)
-#                 .joinedload(Case.inlet_conditions)  # ✅ Load Inlet Conditions under each Case
-#         )
-#     )
+    response = []
+    for project in projects:
+        project_data = {
+            "project_id": project.project_id,
+            "name": project.name,
+            "description": project.description,
+            "cases": []
+        }
 
-#     result = await db.execute(stmt)
-#     project = result.scalars().first()
+        for case in project.cases:
+            case_data = {
+                "case_id": case.case_id,
+                "case_number": case.case_number,
+                "calculated_properties": []
+            }
 
-#     if not project:
-#         raise HTTPException(status_code=404, detail="Project not found")
+            for calculated_property in case.calculated_properties:
+                calculated_property_data = {
+                    "calculated_property_id": calculated_property.id,
+                    "molar_mass": calculated_property.molar_mass,
+                    "volumetric_flow": calculated_property.volumetric_flow,
+                    "standard_volumetric_flow": calculated_property.standard_volumetric_flow,
+                    "vapor_mole_fraction": calculated_property.vapor_mole_fraction,
+                    "relative_humidity": calculated_property.relative_humidity,
+                    "specific_heat_cp": calculated_property.specific_heat_cp,
+                    "specific_heat_cv": calculated_property.specific_heat_cv,
+                    "specific_heat_ratio": calculated_property.specific_heat_ratio,
+                    "specific_gas_constant": calculated_property.specific_gas_constant,
+                    "specific_gravity": calculated_property.specific_gravity,
+                    "density": calculated_property.density,
+                    "compressibility_factor": calculated_property.compressibility_factor,
+                    "speed_of_sound": calculated_property.speed_of_sound,
+                    "dew_point": calculated_property.dew_point
+                }
+                case_data["calculated_properties"].append(calculated_property_data)
 
-#     # ✅ Convert project to a dictionary with properly nested cases
-#     project_dict = {
-#         "project_id": project.project_id,
-#         "name": project.name,
-#         "description": project.description,
-#         "created_at": project.created_at,
-#         "cases": [
-#             {
-#                 "case_id": case.case_id,
-#                 "name": case.name,
-#                 "is_default": case.is_default,
-#                 "selected_components_composition": [
-#                     {
-#                         "id": comp.id,
-#                         "gas_name": comp.gas.name,  # ✅ Correctly placed under the case
-#                         "sequence_number": comp.sequence_number,
-#                         "amount": comp.amount,
-#                         "unit": comp.unit.value,
-#                         "assume_as_100": comp.assume_as_100
-#                     }
-#                     for comp in case.selected_components_composition
-#                 ],
-#                 "inlet_conditions": [
-#                     {
-#                         "id": inlet.id,
-#                         "description": inlet.description,
-#                         "ambient_pressure": inlet.ambient_pressure,
-#                         "ambient_pressure_unit": inlet.ambient_pressure_unit,
-#                         "ambient_temperature": inlet.ambient_temperature,
-#                         "ambient_temperature_unit": inlet.ambient_temperature_unit,
-#                         "guarantee_point":inlet.guarantee_point,
-#                         "suppress":inlet.suppress,
-#                         "pressure": inlet.pressure,
-#                         "pressure_unit": inlet.pressure_unit,
-#                         "temperature": inlet.temperature,
-#                         "temperature_unit": inlet.temperature_unit,
-#                         "flow_type": inlet.flow_type,
-#                         "flow_value": inlet.flow_value,
-#                         "flow_unit": inlet.flow_unit
-#                     }
-#                     for inlet in case.inlet_conditions
-#                 ]
-#             }
-#             for case in project.cases
-#         ]
-#     }
+            project_data["cases"].append(case_data)
 
-#     return project_dict
+        response.append(project_data)
+
+    return {"projects": response}
