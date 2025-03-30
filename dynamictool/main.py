@@ -514,6 +514,8 @@ async def update_gas_composition(
     await db.commit()
     return {"message": "Gas composition updated successfully"}
 
+
+
 @app.get("/projects/{project_id}/gas_compositions3")
 async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db)):
     try:
