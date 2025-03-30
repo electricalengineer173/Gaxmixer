@@ -1,0 +1,34 @@
+# @app.post("/user/component-select/", response_model=List[ComponentResponse]) this api is under working still have issue, project has been stopped
+
+
+### ---------------------------------- Without Authorization -------------------------------------
+from sqlalchemy.future import select
+
+@app.post("/usercreate", status_code=status.HTTP_201_CREATED)
+async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    # 🔹 Use select() instead of query()
+    result = await db.execute(select(User).where(User.username == user.username))
+    existing_user = result.scalars().first()  # Fetch first result
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already exists"
+        )
+
+    # 🔹 Hash the password before storing it
+    hashed_password = pwd_context.hash(user.password)
+
+    # 🔹 Create a new user
+    new_user = User(
+        username=user.username,
+        email=user.email,
+        password=hashed_password,
+        role=user.role
+    )
+    
+    db.add(new_user)
+    await db.commit()   # 🔹 Use await for async commit
+    await db.refresh(new_user)
+
+    return {"message": "User created successfully", "username": new_user.username, "role": new_user.role}
