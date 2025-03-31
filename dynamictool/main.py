@@ -152,7 +152,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), user: di
     await db.delete(db_user)
     await db.commit()
     return {"message": f"User '{user_id}' has been deleted"}
-    
+
 
 @app.get("/projects/", response_model=list[ProjectResponse])
 async def get_projects(
@@ -171,9 +171,49 @@ async def get_projects(
     return projects
 
 
-@app.delete("/admin/projects/{project_name}/", status_code=204)
+# @app.delete("/admin/projects/{project_id}/", status_code=204)
+# async def delete_project(
+#     project_id: int,
+#     db: AsyncSession = Depends(get_db),
+#     user: dict = Depends(get_current_user),  # Get the current user
+# ):
+#     # Check if the current user is an admin
+#     if user["role"] != "admin":
+#         raise HTTPException(status_code=403, detail="Only admins can delete projects")
+    
+#     # ✅ Retrieve the project to delete
+#     result = await db.execute(select(Project).where(Project.project_id == project_id))
+#     #project = result.scalars().first()
+#     project_id = result.scalar_one_or_none()
+#     if not project:
+#         raise HTTPException(status_code=404, detail="Project not found")
+
+#     # Get the project_id for deletion purposes
+#     #project_id = project.project_id
+
+#     # ✅ Delete associated data from related tables explicitly (optional, cascades should handle this)
+    
+
+#     # Example: Delete selected component gas composition
+#     await db.execute(
+#         delete(GasComposition).where(GasComposition.project_id == project_id)
+#     )
+
+#     # Example: Delete inlet conditions
+#     await db.execute(
+#         delete(InletCondition).where(InletCondition.project_id == project_id)
+#     )
+
+#     # Finally, delete the project itself
+#     await db.delete(project)
+#     await db.commit()
+
+#     return {"detail": "Project and its associated data deleted successfully"}
+
+
+@app.delete("/admin/projects/{project_id}/", status_code=202)
 async def delete_project(
-    project_name: str,
+    project_id: int,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),  # Get the current user
 ):
@@ -182,14 +222,11 @@ async def delete_project(
         raise HTTPException(status_code=403, detail="Only admins can delete projects")
     
     # ✅ Retrieve the project to delete
-    result = await db.execute(select(Project).where(Project.name == project_name))
-    project = result.scalars().first()
-
+    result = await db.execute(select(Project).where(Project.project_id == project_id))
+    project = result.scalar_one_or_none()
+    
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-
-    # Get the project_id for deletion purposes
-    project_id = project.project_id
 
     # ✅ Delete associated data from related tables explicitly (optional, cascades should handle this)
     
@@ -209,7 +246,6 @@ async def delete_project(
     await db.commit()
 
     return {"detail": "Project and its associated data deleted successfully"}
-
 
 
 # 🚀 Admin Adds a New Gas (🔒 Protected Route)
