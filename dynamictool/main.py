@@ -135,15 +135,14 @@ async def create_user(
 
     return {"message": "User created successfully", "username": new_user.username, "role": new_user.role,"time":new_user.created_at}
 
-
-@app.delete("admin/users/{username}", response_model=dict)
-async def delete_user(username: str, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+@app.delete("/admin/users/{user_id}", response_model=dict)
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     # ✅ Only admin can delete users
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to delete users")
 
-    # Use `await` with async queries
-    result = await db.execute(select(User).filter(User.username == username))
+    # Use await with async queries
+    result = await db.execute(select(User).filter(User.id == user_id))
     db_user = result.scalar_one_or_none()
     print("db user",db_user)
 
@@ -152,8 +151,8 @@ async def delete_user(username: str, db: AsyncSession = Depends(get_db), user: d
 
     await db.delete(db_user)
     await db.commit()
-    return {"message": f"User '{username}' has been deleted"}
-
+    return {"message": f"User '{user_id}' has been deleted"}
+    
 
 @app.get("/projects/", response_model=list[ProjectResponse])
 async def get_projects(
