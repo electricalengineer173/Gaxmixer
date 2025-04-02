@@ -598,6 +598,7 @@ async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_d
             # Collect all gas compositions for each case
             for gas_composition in case.gas_compositions:
                 gas_composition_data = {
+                    "gas_id": gas_composition.gas_id,
                     "gas_composition_id": gas_composition.id,
                     "sequence_number": gas_composition.sequence_number,
                     "amount": gas_composition.amount,
