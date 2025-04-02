@@ -170,7 +170,17 @@ async def get_projects(
     projects = result.scalars().all()
     return projects
 
+@app.get("/users", response_model=List[UserResponse])
+async def get_all_users(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
 
+    if user["role"] == "admin":  
+        result = await db.execute(select(User))  # Fetch all projects
+    else:
+        result = await db.execute(select(User).where(User.id == user["id"]))  # Fetch only user projects
+    
+    users = result.scalars().all()
+    return users
+    
 # @app.delete("/admin/projects/{project_id}/", status_code=204)
 # async def delete_project(
 #     project_id: int,
