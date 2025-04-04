@@ -545,6 +545,73 @@ async def select_gases(
     await db.commit()
     return {"message": f"Gases selected and initialized in gas composition for all cases under Project {project_id}"}
 
+# @app.post("/projects/{project_id}/cases/")
+# async def create_case(project_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+#     await db.rollback()  # Ensure a clean session
+
+#     # Get the latest case number
+#     last_case = await db.execute(
+#         select(Case).filter_by(project_id=project_id).order_by(Case.case_number.desc())
+#     )
+#     last_case = last_case.scalars().first()
+
+#     # Determine new case number
+#     new_case_number = 1 if not last_case else last_case.case_number + 1
+
+#     # Create new case
+#     new_case = Case(project_id=project_id, case_number=new_case_number)
+#     db.add(new_case)
+#     await db.flush()  # Ensure new_case gets an ID
+#     await db.refresh(new_case)
+
+#     print(f"New case created with ID: {new_case.case_id}")
+
+#     # Copy gases if last case exists
+#     if last_case:
+#         previous_gases = await db.execute(
+#             select(GasComposition).filter_by(project_id=project_id, case_id=last_case.case_id)
+#         )
+#         previous_gases = previous_gases.scalars().all()
+
+#         print(f"Found {len(previous_gases)} gases to copy.")
+
+#         for gas in previous_gases:
+#             new_gas_composition = GasComposition(
+#                 project_id=project_id,
+#                 case_id=new_case.case_id,  
+#                 gas_id=gas.gas_id,
+#                 sequence_number=gas.sequence_number,
+#                 amount=None,
+#                 unit="mol %"
+#             )
+#             db.add(new_gas_composition)
+
+#     # ✅ Initialize InletCondition with NULL values & default units
+#     new_inlet_condition = InletCondition(
+#         project_id=project_id,
+#         case_id=new_case.case_id,
+#         description=None,
+#         ambient_pressure=None,
+#         ambient_pressure_unit="Pa",
+#         ambient_temperature=None,
+#         ambient_temperature_unit="K",
+#         guarantee_point=False,
+#         suppress=False,
+#         pressure=None,
+#         pressure_unit="Pa",
+#         temperature=None,
+#         temperature_unit="K",
+#         flow_type="Mass flow",
+#         flow_value=None,
+#         flow_unit="kg/s"
+#     )
+#     db.add(new_inlet_condition)
+
+    #await db.commit()
+
+    # return {"message": f"Case {new_case_number} created and initialized"}
+
+
 @app.post("/projects/{project_id}/cases/")
 async def create_case(project_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     await db.rollback()  # Ensure a clean session
@@ -564,27 +631,44 @@ async def create_case(project_id: int, db: AsyncSession = Depends(get_db), user:
     await db.flush()  # Ensure new_case gets an ID
     await db.refresh(new_case)
 
-    print(f"New case created with ID: {new_case.case_id}")
+    print(f"✅ New case created with ID: {new_case.case_id}")
 
-    # Copy gases if last case exists
     if last_case:
+        # Copy gases from GasComposition
         previous_gases = await db.execute(
             select(GasComposition).filter_by(project_id=project_id, case_id=last_case.case_id)
         )
         previous_gases = previous_gases.scalars().all()
 
-        print(f"Found {len(previous_gases)} gases to copy.")
+        print(f"Found {len(previous_gases)} gases to copy to GasComposition.")
 
         for gas in previous_gases:
             new_gas_composition = GasComposition(
                 project_id=project_id,
-                case_id=new_case.case_id,  
+                case_id=new_case.case_id,
                 gas_id=gas.gas_id,
                 sequence_number=gas.sequence_number,
                 amount=None,
                 unit="mol %"
             )
             db.add(new_gas_composition)
+
+        # Copy gases to SelectedComponent
+        selected_gases = await db.execute(
+            select(SelectedComponent).filter_by(project_id=project_id, case_id=last_case.case_id)
+        )
+        selected_gases = selected_gases.scalars().all()
+
+        print(f"Found {len(selected_gases)} gases to copy to SelectedComponent.")
+
+        for gas in selected_gases:
+            new_selected_component = SelectedComponent(
+                project_id=project_id,
+                case_id=new_case.case_id,
+                gas_id=gas.gas_id,
+                sequence_number=gas.sequence_number
+            )
+            db.add(new_selected_component)
 
     # ✅ Initialize InletCondition with NULL values & default units
     new_inlet_condition = InletCondition(
@@ -609,8 +693,7 @@ async def create_case(project_id: int, db: AsyncSession = Depends(get_db), user:
 
     await db.commit()
 
-    return {"message": f"Case {new_case_number} created and initialized"}
-
+    return {"message": f"Case {new_case_number} created and gases copied successfully."}
 
 
 
