@@ -475,6 +475,76 @@ async def select_gases(
     return {"message": "Gases selected and initialized in gas composition for Case 1"}
 
 
+@app.post("/user/projects/{project_id}/select-gases-correct/")
+async def select_gases(
+    project_id: int, 
+    gas_ids: List[int],  # Expecting a list of gas IDs
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    # Fetch project and all cases associated with it
+    project_result = await db.execute(select(Project).filter_by(project_id=project_id).options(selectinload(Project.cases)))
+    project = project_result.scalars().first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.cases:
+        raise HTTPException(status_code=404, detail="No cases found for this project")
+
+    for case in project.cases:
+        # Insert selected gases into SelectedComponent & initialize GasComposition
+        for idx, gas_id in enumerate(gas_ids, start=1):
+            selected_gas = SelectedComponent(
+                project_id=project_id,
+                case_id=case.case_id,
+                gas_id=gas_id,
+                sequence_number=idx
+            )
+            db.add(selected_gas)
+
+            gas_composition = GasComposition(
+                project_id=project_id,
+                case_id=case.case_id,
+                gas_id=gas_id,
+                sequence_number=idx,
+                amount=None,  # Default NULL
+                unit="mol %"  # Default unit
+            )
+            db.add(gas_composition)
+
+        # ✅ Ensure InletCondition is initialized if missing
+        existing_inlet = await db.execute(
+            select(InletCondition).filter_by(project_id=project_id, case_id=case.case_id)
+        )
+        existing_inlet = existing_inlet.scalars().first()
+
+        if not existing_inlet:
+            print(f"Initializing InletCondition for Case {case.case_number} as it was missing.")
+
+            new_inlet_condition = InletCondition(
+                project_id=project_id,
+                case_id=case.case_id,
+                description=None,
+                ambient_pressure=None,
+                ambient_pressure_unit="Pa",
+                ambient_temperature=None,
+                ambient_temperature_unit="K",
+                guarantee_point=False,
+                suppress=False,
+                pressure=None,
+                pressure_unit="Pa",
+                temperature=None,
+                temperature_unit="K",
+                flow_type="Mass flow",
+                flow_value=None,
+                flow_unit="kg/s"
+            )
+            db.add(new_inlet_condition)
+
+    await db.commit()
+    return {"message": f"Gases selected and initialized in gas composition for all cases under Project {project_id}"}
+
 @app.post("/projects/{project_id}/cases/")
 async def create_case(project_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     await db.rollback()  # Ensure a clean session
