@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from dynamictool.schemas import UserCreate,GasCompositionUpdate,ComponentSelectRequest,ComponentResponse, ComponentSelectRequest,ProjectResponse1,GasRemoveRequest, SelectedGasResponse,GasSelectRequest, GasResponse, CaseResponse1, SelectedComponentCreateComposit,GasCompositionCreate, InletConditionCreate,GasNameResponse,GasResponse,GasCreate,SelectedComponentCreate, CaseCreate,CaseResponse,  ProjectCreate,ProjectResponse, UserResponse# Fix Import
+from dynamictool.schemas import UserCreate,GasCompositionUpdate,GasCompositionUpdate_new,ComponentSelectRequest,ComponentResponse, ComponentSelectRequest,ProjectResponse1,GasRemoveRequest, SelectedGasResponse,GasSelectRequest, GasResponse, CaseResponse1, SelectedComponentCreateComposit,GasCompositionCreate, InletConditionCreate,GasNameResponse,GasResponse,GasCreate,SelectedComponentCreate, CaseCreate,CaseResponse,  ProjectCreate,ProjectResponse, UserResponse# Fix Import
 from dynamictool.database import User,Gas,GasComposition,CalculatedProperty,User,Project,Case,InletCondition,SelectedComponent,SelectedGas#,SelectedComponentGasComposition
 from dynamictool.database import get_db, startup_event
 from sqlalchemy.future import select
@@ -28,6 +28,7 @@ import pint
 import math
 import logging
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body
 
 # ✅ Use `lifespan` to ensure tables are created
 @asynccontextmanager
@@ -837,6 +838,35 @@ async def update_gas_composition(
     await db.commit()
     return {"message": "Gas composition updated successfully"}
 
+
+@app.put("/projects/{project_id}/cases/{case_id}/gases/update-new/")
+async def update_gas_compositions(
+    project_id: int,
+    case_id: int,
+    updates: List[GasCompositionUpdate_new] = Body(...),  # <-- this fixes it
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    gas_entries = await db.execute(
+        select(GasComposition).filter_by(project_id=project_id, case_id=case_id)
+    )
+    gas_entries = {entry.gas_id: entry for entry in gas_entries.scalars().all()}
+
+    if not gas_entries:
+        raise HTTPException(status_code=404, detail="No gas compositions found for this project and case")
+
+    for update in updates:
+        if update.gas_id in gas_entries:
+            gas_entry = gas_entries[update.gas_id]
+            if update.amount is not None:
+                gas_entry.amount = update.amount
+            if update.unit is not None:
+                gas_entry.unit = update.unit
+        else:
+            raise HTTPException(status_code=404, detail=f"Gas ID {update.gas_id} not found")
+
+    await db.commit()
+    return {"message": "Gas compositions updated successfully"}
 
 
 @app.get("/projects/{project_id}/gas_compositions3")
