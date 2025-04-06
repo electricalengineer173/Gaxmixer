@@ -331,3 +331,8 @@ class ComponentRemoveRequest(BaseModel):
 class GasCompositionUpdate(BaseModel):
     amount: Optional[float] = None  # Allow NULL values
     unit: Optional[UnitType] = None      # Allow changes in the unit
+
+class GasCompositionUpdate_new(BaseModel):
+    gas_id:Optional[int] =None
+    amount: Optional[float] = None  # Allow NULL values
+    unit: Optional[UnitType] = None      # Allow changes in the unit
