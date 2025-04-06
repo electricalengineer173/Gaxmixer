@@ -839,7 +839,7 @@ async def update_gas_composition(
     return {"message": "Gas composition updated successfully"}
 
 
-@app.put("/projects/{project_id}/cases/{case_id}/gases/update-new/")
+@app.put("/projects/{project_id}/cases/{case_id}/gases/update_new/")
 async def update_gas_compositions(
     project_id: int,
     case_id: int,
