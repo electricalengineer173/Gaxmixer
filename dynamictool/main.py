@@ -1382,8 +1382,8 @@ async def calculate_properties(
         return {
             "message": "Calculated properties updated",
             "molar_mass": f"{molar_mass:.3f} kg/kmol",
-            "volumetric_flow": f"{volumetric_flow:.6f} m³/s",
-            "standard_volumetric_flow": f"{standard_volumetric_flow:.6f} m³/s",
+            "volumetric_flow": f"{volumetric_flow:.3f} m³/s",
+            "standard_volumetric_flow": f"{standard_volumetric_flow:.3f} m³/s",
             "specific_gas_constant": f"{specific_gas_constant:.3f} J/kg·K",
             "density": f"{density:.3f} kg/m³",
             "compressibility_factor": f"{compressibility_factor:.3f}",
