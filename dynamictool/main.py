@@ -1450,7 +1450,7 @@ async def calculate_properties(
         
         cpmix = (cpmixa+cpmixb*temp+cpmixc*(temp**2)+cpmixd*(temp**3))*4.189/molar_mass #j/kgK
         cvmix = round(cpmix-specific_gas_constant,3)
-        k=cpmix/cvmix
+        k=round(cpmix/cvmix,3)
 
         speed_of_sound = (k * specific_gas_constant * temperature) ** 0.5
         speed_of_sound = round(speed_of_sound, 3)
