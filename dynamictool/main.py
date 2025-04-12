@@ -868,57 +868,56 @@ async def update_gas_compositions(
     await db.commit()
     return {"message": "Gas compositions updated successfully"}
 
+# @app.get("/projects/{project_id}/gas_compositions3")
+# async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db),user: dict = Depends(get_current_user)):
+#     try:
+#         # Asynchronous query to get Project, Case, and GasComposition details based on project_id
+#         stmt = select(Project).filter(Project.project_id == project_id).options(
+#             selectinload(Project.cases).selectinload(Case.gas_compositions)
+#         )
+
+#         # Execute the query asynchronously
+#         result = await db.execute(stmt)
+#         project_data = result.scalars().first()
+
+#         if not project_data:
+#             raise HTTPException(status_code=404, detail="No data found for the provided project ID")
+
+#         # Prepare the response in the required format
+#         project_response = {
+#             "project_id": project_data.project_id,
+#             "name": project_data.name,
+#             "description": project_data.description,
+#             "cases": []
+#         }
+
+#         # Collect cases and their respective gas compositions
+#         for case in project_data.cases:
+#             case_data = {
+#                 "case_id": case.case_id,
+#                 "case_number": case.case_number,
+#                 "gas_compositions": []
+#             }
+
+#             # Collect all gas compositions for each case
+#             for gas_composition in case.gas_compositions:
+#                 gas_composition_data = {
+#                     "gas_id": gas_composition.gas_id,
+#                     "gas_composition_id": gas_composition.id,
+#                     "sequence_number": gas_composition.sequence_number,
+#                     "amount": gas_composition.amount,
+#                     "unit": gas_composition.unit
+#                 }
+#                 case_data["gas_compositions"].append(gas_composition_data)
+
+#             project_response["cases"].append(case_data)
+
+#         return {"projects": [project_response]}
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.get("/projects/{project_id}/gas_compositions3")
-async def get_gas_compositions(project_id: int, db: AsyncSession = Depends(get_db),user: dict = Depends(get_current_user)):
-    try:
-        # Asynchronous query to get Project, Case, and GasComposition details based on project_id
-        stmt = select(Project).filter(Project.project_id == project_id).options(
-            selectinload(Project.cases).selectinload(Case.gas_compositions)
-        )
-
-        # Execute the query asynchronously
-        result = await db.execute(stmt)
-        project_data = result.scalars().first()
-
-        if not project_data:
-            raise HTTPException(status_code=404, detail="No data found for the provided project ID")
-
-        # Prepare the response in the required format
-        project_response = {
-            "project_id": project_data.project_id,
-            "name": project_data.name,
-            "description": project_data.description,
-            "cases": []
-        }
-
-        # Collect cases and their respective gas compositions
-        for case in project_data.cases:
-            case_data = {
-                "case_id": case.case_id,
-                "case_number": case.case_number,
-                "gas_compositions": []
-            }
-
-            # Collect all gas compositions for each case
-            for gas_composition in case.gas_compositions:
-                gas_composition_data = {
-                    "gas_id": gas_composition.gas_id,
-                    "gas_composition_id": gas_composition.id,
-                    "sequence_number": gas_composition.sequence_number,
-                    "amount": gas_composition.amount,
-                    "unit": gas_composition.unit
-                }
-                case_data["gas_compositions"].append(gas_composition_data)
-
-            project_response["cases"].append(case_data)
-
-        return {"projects": [project_response]}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-@app.get("/projects/{project_id}/gas_compositions4")
 async def get_gas_compositions(
     project_id: int,
     db: AsyncSession = Depends(get_db),
