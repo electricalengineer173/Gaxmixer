@@ -207,6 +207,17 @@ class GasComposition(Base):
     case = relationship("Case", back_populates="gas_compositions")  
     gas = relationship("Gas")
 
+class CpTable(Base):
+    __tablename__ = "cp_table"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    abbr = Column(String(200), nullable=True)
+    CpA = Column(Float, nullable=True)
+    CpB = Column(Float, nullable=True)
+    CpC = Column(Float, nullable=True)
+    CpD = Column(Float, nullable=True)
+    
 # ✅ Force table creation on startup
 async def create_tables():
     async with async_engine.begin() as conn:
