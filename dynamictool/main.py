@@ -390,7 +390,7 @@ async def create_project(
 @app.get("/gases/")
 async def get_all_gases(
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(500, ge=1, le=500),
+    limit: int = Query(200, ge=1, le=500),
     user: dict = Depends(get_current_user),
 ):
     result = await db.execute(select(Gas).limit(limit))  
