@@ -1285,7 +1285,7 @@ def calculate_relative_humidity(temperature, pressure, gas_compositions, gas_lis
     print(temp_C,"....................................")
     # Only valid if temperature is within the valid range of the Antoine equation
     if temp_C < 0 or temp_C > 100:
-        return None
+        return 0
 
     # Calculate saturation pressure (p_h2o_sat) in Pa (converting from mmHg)
     p_h2o_sat = 10**(A - (B / (temp_C + C))) * 133.322  # Antoine eq. result * conversion factor from mmHg to Pa
@@ -1302,17 +1302,17 @@ def calculate_specific_heat_cv(specific_heat_cp, specific_gas_constant):
 
 def calculate_specific_heat_ratio(specific_heat_cp, specific_heat_cv):
     """Calculate specific heat ratio (γ = Cp/Cv)"""
-    return specific_heat_cp / specific_heat_cv if specific_heat_cv else None
+    return specific_heat_cp / specific_heat_cv if specific_heat_cv else 0
 
 def calculate_specific_gas_constant(molar_mass):
     """Calculate specific gas constant (R_specific)"""
     R_universal = 8314  # J/kmol·K
-    return R_universal / molar_mass if molar_mass else None
+    return R_universal / molar_mass if molar_mass else 0
 
 def calculate_specific_gravity(density):
     """Calculate specific gravity R (SG = ρ_gas / ρ_air)"""
     rho_air = 1.225  # kg/m³ at standard conditions
-    return density / rho_air if density else None
+    return density / rho_air if density else 0
 
 def calculate_dew_point(temperature, relative_humidity):
     """Calculate dew point using Magnus-Tetens approximation"""
