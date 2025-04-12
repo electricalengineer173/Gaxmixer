@@ -5,6 +5,7 @@ from sqlalchemy import text
 from dynamictool.schemas import UnitType, UserCreate,GasCompositionUpdate,GasCompositionUpdate_new,ComponentSelectRequest,ComponentResponse, ComponentSelectRequest,ProjectResponse1,GasRemoveRequest, SelectedGasResponse,GasSelectRequest, GasResponse, CaseResponse1, SelectedComponentCreateComposit,GasCompositionCreate, InletConditionCreate,GasNameResponse,GasResponse,GasCreate,SelectedComponentCreate, CaseCreate,CaseResponse,  ProjectCreate,ProjectResponse, UserResponse# Fix Import
 from dynamictool.database import User,Gas,GasComposition,CalculatedProperty,User,Project,Case,InletCondition,SelectedComponent,SelectedGas#,SelectedComponentGasComposition
 from dynamictool.database import get_db, startup_event
+from dynamictool.database import CpTable
 from sqlalchemy.future import select
 from dynamictool.security import verify_password
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -29,6 +30,7 @@ import math
 import logging
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Body
+from io import StringIO
 
 # ✅ Use `lifespan` to ensure tables are created
 @asynccontextmanager
