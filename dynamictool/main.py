@@ -60,7 +60,7 @@ async def read_root():
 
 @app.post("/login")
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    user = await db.execute(select(User).where(User.username == form_data.username))
+    user = await db.execute(select(User).where(User.email == form_data.username))
     user = user.scalars().first()
     
     if not user or not verify_password(form_data.password, user.password):
