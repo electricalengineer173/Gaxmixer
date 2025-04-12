@@ -1172,7 +1172,7 @@ def calculate_molar_mass(gas_compositions,gas_list):
                 )
         if molar_mass <= 0:
             raise ValueError("Calculated molar mass is zero or negative. Check gas compositions.")
-        return molar_mass
+        return molar_mass/1000
     except Exception as e:
         raise ValueError(f"Error calculating molar mass: {e}")
 
