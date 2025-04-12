@@ -1070,10 +1070,6 @@ async def get_inlet_conditions(project_id: int, db: AsyncSession = Depends(get_d
 #----------------------------------------------- Selected_Component-----------------------------------
 
 
-#--------------------------------------------------------------Calculation----------------------------------------------------
-# Initialize the Unit Registry
-ureg = pint.UnitRegistry()
-
 # Initialize the Unit Registry
 ureg = pint.UnitRegistry()
 
@@ -1134,7 +1130,7 @@ def convert_to_mole_fractions(gas_list, gas_compositions):
     gas_id_to_mw = {gas_id: mw for gas_id, _, mw in gas_list}
     total_moles = 0.0
     mole_fractions = {}
-
+    total_moled = 0
     # First pass to compute total moles
     for gc in gas_compositions:
         mw = gas_id_to_mw.get(gc.gas_id, 1.0)  # Default MW=1 if missing to prevent crash
@@ -1160,6 +1156,22 @@ def convert_to_mole_fractions(gas_list, gas_compositions):
     return mole_fractions
 
 
+def calculate_molar_mass(gas_compositions,gas_list):
+    """Calculate molar mass from gas compositions with error handling."""
+
+    try:
+        gas_id_to_weight = {g.gas_id: g.molecular_weight for g in gas_list}
+        molar_mass = sum(
+                    ((gc.amount / 100) * gas_id_to_weight.get(gc.gas_id, 0)) if gc.amount is not None else 0
+                    for gc in gas_compositions
+                )
+        
+        if molar_mass <= 0:
+            raise ValueError("Calculated molar mass is zero or negative. Check gas compositions.")
+        return molar_mass
+    except Exception as e:
+        raise ValueError(f"Error calculating molar mass: {e}")
+
 
 def calculate_molar_mass(gas_compositions,gas_list):
     """Calculate molar mass from gas compositions with error handling."""
@@ -1179,27 +1191,35 @@ def calculate_molar_mass(gas_compositions,gas_list):
 
 def calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure):
     """Calculate volumetric flow using ideal gas law with error handling."""
-    R = 8314  # J/kmol·K
+    R = 8.314  # J/mol·K
 
     # --- Flow Rate ---
     flow_type = inlet_condition.flow_type
     flow_unit = inlet_condition.flow_unit
     flow_value = inlet_condition.flow_value
-
+    # molar_mass  --> kg/mol
     # Convert only if not in SI
     if flow_type == "Mass flow":
         if flow_unit == "kg/s":
             flow_value = flow_value  # SI
         elif flow_unit == "lb/s":
             flow_value = (flow_value * ureg.pound / ureg.second).to(ureg.kg / ureg.s).magnitude
+
+        vol_result = (flow_value * R * temperature) / (pressure * molar_mass)
+
     elif flow_type == "Volumetric flow":
         if flow_unit == "m³/s":
-            flow_value = flow_value  # SI
+            flow_value = (flow_value * ureg.meter**3/ ureg.second).to(ureg.meter ** 3 / ureg.hour).magnitude
         elif flow_unit == "L/s":
-            flow_value = (flow_value * ureg.liter / ureg.second).to(ureg.meter ** 3 / ureg.second).magnitude
+            flow_value = (flow_value * ureg.liter / ureg.second).to(ureg.meter ** 3 / ureg.hour).magnitude
+
+        vol_result = flow_value
+
     elif flow_type == "Standard volumetric flow":
         if flow_unit == "SLPM":
-            flow_value = (flow_value * ureg.liter / ureg.minute).to(ureg.meter ** 3 / ureg.second).magnitude
+            flow_value = (flow_value * ureg.liter / ureg.minute).to(ureg.meter ** 3 / ureg.hour).magnitude
+        vol_result = flow_value
+
     else:
         raise ValueError(f"Unsupported flow type & its unit: {flow_type}")
 
@@ -1210,18 +1230,19 @@ def calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure
         raise ValueError("Pressure must be greater than zero.")
     if temperature <= 0:
         raise ValueError("Temperature must be greater than zero.")
-
-    return (flow_value * R * temperature) / (pressure * molar_mass)
+    
+    
+    return vol_result
 
 def calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure):
     """Calculate additional properties based on thermodynamic equations"""
-    R = 8314  # J/kmol·K
+    R = 8.314  # J/mol·K
     P_std = 101325  # Standard pressure in Pa
     T_std = 273.15  # Standard temperature in K
-    gamma = 1.4  # Specific heat ratio for diatomic gases
+    # gamma = 1.4  # Specific heat ratio for diatomic gases
 
     # Standard Volumetric Flow
-    standard_volumetric_flow = (volumetric_flow * P_std * temperature) / (pressure * T_std)
+    standard_volumetric_flow = round((volumetric_flow * P_std * temperature) / (pressure * T_std),3)
 
     # Specific Gas Constant (J/kg·K)
     R_gas = R / molar_mass
@@ -1233,21 +1254,9 @@ def calculate_additional_properties(volumetric_flow, molar_mass, temperature, pr
     Z = 1.0  
 
     # Speed of Sound (m/s)
-    speed_of_sound = (gamma * R_gas * temperature) ** 0.5
+    #speed_of_sound = (gamma * R_gas * temperature) ** 0.5
 
-    return standard_volumetric_flow, R_gas, density, Z, speed_of_sound
-
-
-# def calculate_vapor_mole_fraction(gas_list, gas_compositions):
-#     """Calculate vapor mole fraction based on gas IDs and lookup from gas_list"""
-#     gas_id_to_name = {gas_id: name for gas_id, name, _ in gas_list}
-    
-#     vapor_mole_fraction = sum(
-#         (gc.amount / 100) if gas_id_to_name.get(gc.gas_id) == "H2O" else 0
-#         for gc in gas_compositions
-#     )
-#     return vapor_mole_fraction
-
+    return standard_volumetric_flow, R_gas, density, Z
 
 def calculate_vapor_mole_fraction(gas_list, gas_compositions):
     """Calculate vapor mole fraction (e.g., for water vapor)"""
@@ -1324,7 +1333,34 @@ def calculate_dew_point(temperature, relative_humidity):
     dew_point = (B * alpha) / (A - alpha) + 273.15  # Convert back to Kelvin
     return dew_point
 
+def calculate_cpmix(results):
+    CpMix_A = 0.0
+    CpMix_B = 0.0
+    CpMix_C = 0.0
+    CpMix_D = 0.0
 
+
+    for row in results:
+        amount = row[3] or 0.0  # Handle None
+        cp_a = row[6] or 0.0
+        cp_b = row[7] or 0.0
+        cp_c = row[8] or 0.0
+        cp_d = row[9] or 0.0
+        temp = row[10]
+
+        # ✅ Convert amount to mol %
+        if row[4] == UnitType.MOL_PERCENT:
+            amount = amount/100
+        else:
+            None
+
+        CpMix_A += (amount) * cp_a
+        CpMix_B += (amount) * cp_b
+        CpMix_C += (amount) * cp_c
+        CpMix_D += (amount) * cp_d
+
+    return  CpMix_A, CpMix_B, CpMix_C,CpMix_D,temp
+    
 
 @app.put("/projects/{project_id}/cases/{case_id}/calculate/")
 async def calculate_properties(
@@ -1341,6 +1377,36 @@ async def calculate_properties(
             .filter_by(project_id=project_id, case_id=case_id)
         )
         gas_compositions = gas_compositions_result.scalars().all()
+
+        stmt = (
+                    select(
+                        GasComposition.project_id,
+                        GasComposition.case_id,
+                        GasComposition.gas_id,
+                        GasComposition.amount,
+                        GasComposition.unit,
+                        Gas.name.label("gas_name"),
+                        CpTable.CpA,
+                        CpTable.CpB,
+                        CpTable.CpC,
+                        CpTable.CpD,
+                        InletCondition.temperature
+                    )
+                    .join(Gas, GasComposition.gas_id == Gas.gas_id)
+                    .join(CpTable, Gas.name == CpTable.name)
+                    .join(InletCondition, 
+                        (InletCondition.project_id == GasComposition.project_id) &
+                        (InletCondition.case_id == GasComposition.case_id)
+                    )
+                    .where(
+                        GasComposition.project_id == project_id,
+                        GasComposition.case_id == case_id
+                    )
+                )
+
+        result = await db.execute(stmt)
+        rows = result.fetchall()
+
 
         if not gas_compositions:
             raise HTTPException(status_code=404, detail="No gas compositions found")
@@ -1369,22 +1435,38 @@ async def calculate_properties(
             raise HTTPException(status_code=400, detail="Critical values like pressure, temperature, or flow rate are zero")
 
         # Calculations
-        molar_mass = round(calculate_molar_mass(gas_compositions, gas_list), 3)
-        volumetric_flow = round(calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure), 6)
 
-        standard_volumetric_flow, specific_gas_constant, density, compressibility_factor, speed_of_sound = \
+        cpmixa,cpmixb,cpmixc,cpmixd,temp = calculate_cpmix(rows)
+        print(cpmixa,cpmixb,cpmixc,cpmixd,temp)
+
+        molar_mass = round(calculate_molar_mass(gas_compositions, gas_list), 3)
+
+        volumetric_flow = round(calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure), 3)
+
+        standard_volumetric_flow, specific_gas_constant, density, compressibility_factor,  = \
             calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure)
+        
+        cpmix = (cpmixa+cpmixb*temp+cpmixc*(temp**2)+cpmixd*(temp**3))*4.189/molar_mass #j/kgK
+        cvmix = cpmix-specific_gas_constant
+        k=cpmix/cvmix
+
+        speed_of_sound = (k * specific_gas_constant * temperature) ** 0.5
+        speed_of_sound = round(speed_of_sound, 3)
 
         specific_gas_constant = round(specific_gas_constant, 3)
         compressibility_factor = round(compressibility_factor, 3)
-        speed_of_sound = round(speed_of_sound, 3)
+        
         vapor_mole_fraction = round(calculate_vapor_mole_fraction(gas_list, gas_compositions), 3)
 
-        density = round((pressure * molar_mass) / (specific_gas_constant * temperature), 3)
+        density = round((pressure * molar_mass) / (specific_gas_constant * temperature),6)
+
         relative_humidity = round(calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list), 3)
         dew_point = round(calculate_dew_point(temperature, relative_humidity), 3)
-
+        print("Important details--------------------------------",density,specific_gas_constant ,temperature,molar_mass)
         specific_gravity = round(molar_mass / 28.97, 3)
+
+
+
 
         # Update or insert
         existing_record_result = await db.execute(
@@ -1398,10 +1480,10 @@ async def calculate_properties(
             existing_record.standard_volumetric_flow = round(standard_volumetric_flow,3)
             existing_record.vapor_mole_fraction = vapor_mole_fraction
             existing_record.relative_humidity = relative_humidity
-            existing_record.specific_heat_cp = 0.0
-            existing_record.specific_heat_cv = 0.0
-            existing_record.specific_heat_ratio = 0.0
-            existing_record.specific_gas_constant = specific_gas_constant
+            existing_record.specific_heat_cp = round(cpmix,3)
+            existing_record.specific_heat_cv = cvmix
+            existing_record.specific_heat_ratio = k
+            existing_record.specific_gas_constant = specific_gas_constant 
             existing_record.specific_gravity = specific_gravity
             existing_record.density = density
             existing_record.compressibility_factor = compressibility_factor
@@ -1416,9 +1498,9 @@ async def calculate_properties(
                 standard_volumetric_flow=round(standard_volumetric_flow,3),
                 vapor_mole_fraction=vapor_mole_fraction,
                 relative_humidity=relative_humidity,
-                specific_heat_cp=0.0,
-                specific_heat_cv=0.0,
-                specific_heat_ratio=0.0,
+                specific_heat_cp=round(cpmix,3),
+                specific_heat_cv=cvmix,
+                specific_heat_ratio=k,
                 specific_gas_constant=specific_gas_constant,
                 specific_gravity=specific_gravity,
                 density=density,
@@ -1432,16 +1514,19 @@ async def calculate_properties(
 
         return {
             "message": "Calculated properties updated",
-            "molar_mass": f"{molar_mass:.3f} kg/kmol",
-            "volumetric_flow": f"{volumetric_flow:.3f} m³/s",
-            "standard_volumetric_flow": f"{standard_volumetric_flow:.3f} m³/s",
+            "molar_mass": f"{molar_mass:.3f} kg/mol",
+            "volumetric_flow": f"{volumetric_flow:.3f} m³/h",
+            "standard_volumetric_flow": f"{standard_volumetric_flow:.3f} m³/h",
             "specific_gas_constant": f"{specific_gas_constant:.3f} J/kg·K",
-            "density": f"{density:.3f} kg/m³",
+            "density": f"{density:.6f} kg/m³",
             "compressibility_factor": f"{compressibility_factor:.3f}",
             "speed_of_sound": f"{speed_of_sound:.3f} m/s",
             "vapor_mole_fraction": f"{vapor_mole_fraction:.3f}",
             "relative_humidity": f"{relative_humidity:.3f}",
             "dew_point": f"{dew_point:.3f} °C",
+            "Cp":f"{cpmix:.3f} J/kg-K",
+            "Cv":f"{cvmix:.3f} J/kg-K",
+            "k":f"{k:.3f} J/kg-K",
         }
 
     except ValueError as ve:
@@ -1450,10 +1535,6 @@ async def calculate_properties(
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
-
-
-
-
 
 
 @app.get("/projects/{project_id}/calculated_properties")
@@ -1511,4 +1592,451 @@ async def get_calculated_properties(project_id: int, db: AsyncSession = Depends(
         response.append(project_data)
 
     return {"projects": response}
+
+
+
+
+# #--------------------------------------------------------------Calculation----------------------------------------------------
+# # Initialize the Unit Registry
+# ureg = pint.UnitRegistry()
+
+# # Initialize the Unit Registry
+# ureg = pint.UnitRegistry()
+
+
+# # -------------------------------------------------Functions for Calculations ----------------------------------------------------
+# def convert_to_standard_units(inlet_condition):
+#     """Convert pressure, temperature, and flow values to standard SI units (Pa, K, m³/s or kg/s)"""
+#     try:
+#         # --- Pressure ---
+#         if inlet_condition.pressure_unit == "bar":
+#             pressure = ureg.Quantity(inlet_condition.pressure, ureg.bar).to(ureg.Pa).magnitude
+#         elif inlet_condition.pressure_unit == "atm":
+#             pressure = ureg.Quantity(inlet_condition.pressure, ureg.atm).to(ureg.Pa).magnitude
+#         elif inlet_condition.pressure_unit == "Pa":
+#             pressure = inlet_condition.pressure
+#         else:
+#             raise ValueError("Unsupported pressure unit.")
+
+#         if inlet_condition.ambient_pressure_unit == "bar":
+#             ambient_pressure = ureg.Quantity(inlet_condition.ambient_pressure, ureg.bar).to(ureg.Pa).magnitude
+#         elif inlet_condition.ambient_pressure_unit == "atm":
+#             ambient_pressure = ureg.Quantity(inlet_condition.ambient_pressure, ureg.atm).to(ureg.Pa).magnitude
+#         elif inlet_condition.ambient_pressure_unit == "Pa":
+#             ambient_pressure = inlet_condition.ambient_pressure
+#         else:
+#             raise ValueError("Unsupported ambient pressure unit.")
+
+#         # --- Temperature ---
+#         if inlet_condition.temperature_unit == "C":
+#             temperature = ureg.Quantity(inlet_condition.temperature, ureg.degC).to(ureg.K).magnitude
+#         elif inlet_condition.temperature_unit == "F":
+#             temperature = ureg.Quantity(inlet_condition.temperature, ureg.degF).to(ureg.K).magnitude
+#         elif inlet_condition.temperature_unit == "K":
+#             temperature = inlet_condition.temperature
+#         else:
+#             raise ValueError(f"Unsupported temperature unit: {inlet_condition.temperature_unit}")
+
+#         if inlet_condition.ambient_temperature_unit == "C":
+#             ambient_temperature = ureg.Quantity(inlet_condition.ambient_temperature, ureg.degC).to(ureg.K).magnitude
+#         elif inlet_condition.ambient_temperature_unit == "F":
+#             ambient_temperature = ureg.Quantity(inlet_condition.ambient_temperature, ureg.degF).to(ureg.K).magnitude
+#         elif inlet_condition.ambient_temperature_unit == "K":
+#             ambient_temperature = inlet_condition.ambient_temperature
+#         else:
+#             raise ValueError(f"Unsupported ambient temperature unit: {inlet_condition.ambient_temperature_unit}")
+
+#         return pressure, temperature, ambient_pressure, ambient_temperature
+
+#     except Exception as e:
+#         raise ValueError(f"Error in unit conversion: {e}")
+
+
+# def convert_to_mole_fractions(gas_list, gas_compositions):
+#     """
+#     Convert all gas compositions to mole fractions based on input units.
+#     Returns: Dict[gas_id] = mole_fraction
+#     """
+#     gas_id_to_mw = {gas_id: mw for gas_id, _, mw in gas_list}
+#     total_moles = 0.0
+#     mole_fractions = {}
+
+#     # First pass to compute total moles
+#     for gc in gas_compositions:
+#         mw = gas_id_to_mw.get(gc.gas_id, 1.0)  # Default MW=1 if missing to prevent crash
+#         if gc.unit == UnitType.MOL_PERCENT:
+#             moles = gc.amount / 100.0
+#         elif gc.unit == UnitType.MOL_FRACTION:
+#             moles = gc.amount
+#         elif gc.unit == UnitType.WEIGHT_PERCENT:
+#             weight_fraction = gc.amount / 100.0
+#             moles = weight_fraction / mw
+#         elif gc.unit == UnitType.WEIGHT_FRACTION:
+#             moles = gc.amount / mw
+#         else:
+#             raise ValueError(f"Unsupported unit type: {gc.unit}")
+
+#         mole_fractions[gc.gas_id] = moles
+#         total_moles += moles
+
+#     # Normalize to mole fraction (SI)
+#     for gas_id in mole_fractions:
+#         mole_fractions[gas_id] /= total_moles
+
+#     return mole_fractions
+
+
+
+# def calculate_molar_mass(gas_compositions,gas_list):
+#     """Calculate molar mass from gas compositions with error handling."""
+
+#     try:
+#         gas_id_to_weight = {g.gas_id: g.molecular_weight for g in gas_list}
+#         molar_mass = sum(
+#                     ((gc.amount / 100) * gas_id_to_weight.get(gc.gas_id, 0)) if gc.amount is not None else 0
+#                     for gc in gas_compositions
+#                 )
+#         if molar_mass <= 0:
+#             raise ValueError("Calculated molar mass is zero or negative. Check gas compositions.")
+#         return molar_mass/1000
+#     except Exception as e:
+#         raise ValueError(f"Error calculating molar mass: {e}")
+
+
+# def calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure):
+#     """Calculate volumetric flow using ideal gas law with error handling."""
+#     R = 8314  # J/kmol·K
+
+#     # --- Flow Rate ---
+#     flow_type = inlet_condition.flow_type
+#     flow_unit = inlet_condition.flow_unit
+#     flow_value = inlet_condition.flow_value
+
+#     # Convert only if not in SI
+#     if flow_type == "Mass flow":
+#         if flow_unit == "kg/s":
+#             flow_value = flow_value  # SI
+#         elif flow_unit == "lb/s":
+#             flow_value = (flow_value * ureg.pound / ureg.second).to(ureg.kg / ureg.s).magnitude
+#     elif flow_type == "Volumetric flow":
+#         if flow_unit == "m³/s":
+#             flow_value = flow_value  # SI
+#         elif flow_unit == "L/s":
+#             flow_value = (flow_value * ureg.liter / ureg.second).to(ureg.meter ** 3 / ureg.second).magnitude
+#     elif flow_type == "Standard volumetric flow":
+#         if flow_unit == "SLPM":
+#             flow_value = (flow_value * ureg.liter / ureg.minute).to(ureg.meter ** 3 / ureg.second).magnitude
+#     else:
+#         raise ValueError(f"Unsupported flow type & its unit: {flow_type}")
+
+#     # Ensure values are valid before calculation
+#     if molar_mass <= 0:
+#         raise ValueError("Molar mass must be greater than zero.")
+#     if pressure <= 0:
+#         raise ValueError("Pressure must be greater than zero.")
+#     if temperature <= 0:
+#         raise ValueError("Temperature must be greater than zero.")
+
+#     return (flow_value * R * temperature) / (pressure * molar_mass)
+
+# def calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure):
+#     """Calculate additional properties based on thermodynamic equations"""
+#     R = 8314  # J/kmol·K
+#     P_std = 101325  # Standard pressure in Pa
+#     T_std = 273.15  # Standard temperature in K
+#     gamma = 1.4  # Specific heat ratio for diatomic gases
+
+#     # Standard Volumetric Flow
+#     standard_volumetric_flow = (volumetric_flow * P_std * temperature) / (pressure * T_std)
+
+#     # Specific Gas Constant (J/kg·K)
+#     R_gas = R / molar_mass
+
+#     # Density (kg/m³)
+#     density = pressure / (R_gas * temperature)
+
+#     # Compressibility Factor (Z) (Ideal Gas)
+#     Z = 1.0  
+
+#     # Speed of Sound (m/s)
+#     speed_of_sound = (gamma * R_gas * temperature) ** 0.5
+
+#     return standard_volumetric_flow, R_gas, density, Z, speed_of_sound
+
+
+# # def calculate_vapor_mole_fraction(gas_list, gas_compositions):
+# #     """Calculate vapor mole fraction based on gas IDs and lookup from gas_list"""
+# #     gas_id_to_name = {gas_id: name for gas_id, name, _ in gas_list}
+    
+# #     vapor_mole_fraction = sum(
+# #         (gc.amount / 100) if gas_id_to_name.get(gc.gas_id) == "H2O" else 0
+# #         for gc in gas_compositions
+# #     )
+# #     return vapor_mole_fraction
+
+
+# def calculate_vapor_mole_fraction(gas_list, gas_compositions):
+#     """Calculate vapor mole fraction (e.g., for water vapor)"""
+#     gas_id_to_name = {gas_id: name for gas_id, name, _ in gas_list}
+#     mole_fractions = convert_to_mole_fractions(gas_list, gas_compositions)
+
+#     # Sum only for water vapor (H2O)
+#     vapor_mole_fraction = sum(
+#         mole_frac for gas_id, mole_frac in mole_fractions.items()
+#         if gas_id_to_name.get(gas_id) == "H2O"
+#     )
+#     return vapor_mole_fraction
+
+
+
+# def calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list):
+#     """Calculate relative humidity using partial pressure of water vapor.
+#     Uses a lookup in gas_list (a list of tuples: (gas_id, name, molecular_weight))
+#     to find the component whose name is "H2O".
+#     """
+
+#     # Create mapping from gas_id to gas name from the gas_list
+#     gas_id_to_name = {gas_id: name for gas_id, name, _ in gas_list}
+#     print(gas_id_to_name,"gas id to name....................")
+#     # Calculate partial pressure of H2O using the gas_id lookup
+#     p_h2o = sum(
+#         (gc.amount / 100) * pressure 
+#         for gc in gas_compositions 
+#         if gas_id_to_name.get(gc.gas_id) == "H2O"
+#     )
+
+#     # Antoine constants for water vapor (valid for 1-100°C)
+#     A, B, C = 8.07131, 1730.63, 233.426
+#     temp_C = temperature - 273.15  # Convert Kelvin to °C
+#     print(temp_C,"....................................")
+#     # Only valid if temperature is within the valid range of the Antoine equation
+#     if temp_C < 0 or temp_C > 100:
+#         return 0
+
+#     # Calculate saturation pressure (p_h2o_sat) in Pa (converting from mmHg)
+#     p_h2o_sat = 10**(A - (B / (temp_C + C))) * 133.322  # Antoine eq. result * conversion factor from mmHg to Pa
+
+#     # Calculate relative humidity (%)
+#     relative_humidity = (p_h2o / p_h2o_sat) * 100 if p_h2o_sat else 0
+
+#     return relative_humidity 
+
+
+# def calculate_specific_heat_cv(specific_heat_cp, specific_gas_constant):
+#     """Calculate specific heat at constant volume (Cv)"""
+#     return specific_heat_cp - specific_gas_constant
+
+# def calculate_specific_heat_ratio(specific_heat_cp, specific_heat_cv):
+#     """Calculate specific heat ratio (γ = Cp/Cv)"""
+#     return specific_heat_cp / specific_heat_cv if specific_heat_cv else 0
+
+# def calculate_specific_gas_constant(molar_mass):
+#     """Calculate specific gas constant (R_specific)"""
+#     R_universal = 8314  # J/kmol·K
+#     return R_universal / molar_mass if molar_mass else 0
+
+# def calculate_specific_gravity(density):
+#     """Calculate specific gravity R (SG = ρ_gas / ρ_air)"""
+#     rho_air = 1.225  # kg/m³ at standard conditions
+#     return density / rho_air if density else 0
+
+# def calculate_dew_point(temperature, relative_humidity):
+#     """Calculate dew point using Magnus-Tetens approximation"""
+#     if not relative_humidity:
+#         return 0
+
+#     A, B = 17.62, 243.12  # Constants for Magnus equation
+#     alpha = math.log(relative_humidity / 100) + (A * (temperature - 273.15)) / (B + (temperature - 273.15))
+#     dew_point = (B * alpha) / (A - alpha) + 273.15  # Convert back to Kelvin
+#     return dew_point
+
+
+
+# @app.put("/projects/{project_id}/cases/{case_id}/calculate/")
+# async def calculate_properties(
+#     project_id: int,
+#     case_id: int,
+#     db: AsyncSession = Depends(get_db),
+#     user: dict = Depends(get_current_user)
+# ):
+#     try:
+#         # Get Gas Composition
+#         gas_compositions_result = await db.execute(
+#             select(GasComposition)
+#             .options(joinedload(GasComposition.gas))
+#             .filter_by(project_id=project_id, case_id=case_id)
+#         )
+#         gas_compositions = gas_compositions_result.scalars().all()
+
+#         if not gas_compositions:
+#             raise HTTPException(status_code=404, detail="No gas compositions found")
+        
+#         gas_ids = {gc.gas_id for gc in gas_compositions}
+
+#         gas_result = await db.execute(
+#             select(Gas.gas_id, Gas.name, Gas.molecular_weight).where(Gas.gas_id.in_(gas_ids))
+#         )
+#         gas_list = gas_result.all()
+
+#         if not gas_list:
+#             raise HTTPException(status_code=404, detail="No matching gases found")
+
+#         inlet_condition_result = await db.execute(
+#             select(InletCondition).filter_by(project_id=project_id, case_id=case_id)
+#         )
+#         inlet_condition = inlet_condition_result.scalars().first()
+
+#         if not inlet_condition:
+#             raise HTTPException(status_code=404, detail="No inlet conditions found")
+
+#         pressure, temperature, ambient_pressure, ambient_temperature = convert_to_standard_units(inlet_condition)
+
+#         if pressure == 0 or temperature == 0:
+#             raise HTTPException(status_code=400, detail="Critical values like pressure, temperature, or flow rate are zero")
+
+#         # Calculations
+#         molar_mass = round(calculate_molar_mass(gas_compositions, gas_list), 3)
+#         volumetric_flow = round(calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure), 6)
+
+#         standard_volumetric_flow, specific_gas_constant, density, compressibility_factor, speed_of_sound = \
+#             calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure)
+
+#         specific_gas_constant = round(specific_gas_constant, 3)
+#         compressibility_factor = round(compressibility_factor, 3)
+#         speed_of_sound = round(speed_of_sound, 3)
+#         vapor_mole_fraction = round(calculate_vapor_mole_fraction(gas_list, gas_compositions), 3)
+
+#         density = round((pressure * molar_mass) / (specific_gas_constant * temperature), 3)
+#         relative_humidity = round(calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list), 3)
+#         dew_point = round(calculate_dew_point(temperature, relative_humidity), 3)
+
+#         specific_gravity = round(molar_mass / 28.97, 3)
+
+#         # Update or insert
+#         existing_record_result = await db.execute(
+#             select(CalculatedProperty).filter_by(project_id=project_id, case_id=case_id)
+#         )
+#         existing_record = existing_record_result.scalars().first()
+
+#         if existing_record:
+#             existing_record.molar_mass = molar_mass
+#             existing_record.volumetric_flow = round(volumetric_flow,3)
+#             existing_record.standard_volumetric_flow = round(standard_volumetric_flow,3)
+#             existing_record.vapor_mole_fraction = vapor_mole_fraction
+#             existing_record.relative_humidity = relative_humidity
+#             existing_record.specific_heat_cp = 0.0
+#             existing_record.specific_heat_cv = 0.0
+#             existing_record.specific_heat_ratio = 0.0
+#             existing_record.specific_gas_constant = specific_gas_constant
+#             existing_record.specific_gravity = specific_gravity
+#             existing_record.density = density
+#             existing_record.compressibility_factor = compressibility_factor
+#             existing_record.speed_of_sound = speed_of_sound
+#             existing_record.dew_point = dew_point
+#         else:
+#             new_record = CalculatedProperty(
+#                 project_id=project_id,
+#                 case_id=case_id,
+#                 molar_mass=molar_mass,
+#                 volumetric_flow=round(volumetric_flow,3),
+#                 standard_volumetric_flow=round(standard_volumetric_flow,3),
+#                 vapor_mole_fraction=vapor_mole_fraction,
+#                 relative_humidity=relative_humidity,
+#                 specific_heat_cp=0.0,
+#                 specific_heat_cv=0.0,
+#                 specific_heat_ratio=0.0,
+#                 specific_gas_constant=specific_gas_constant,
+#                 specific_gravity=specific_gravity,
+#                 density=density,
+#                 compressibility_factor=compressibility_factor,
+#                 speed_of_sound=speed_of_sound,
+#                 dew_point=dew_point
+#             )
+#             db.add(new_record)
+
+#         await db.commit()
+
+#         return {
+#             "message": "Calculated properties updated",
+#             "molar_mass": f"{molar_mass:.3f} kg/kmol",
+#             "volumetric_flow": f"{volumetric_flow:.3f} m³/s",
+#             "standard_volumetric_flow": f"{standard_volumetric_flow:.3f} m³/s",
+#             "specific_gas_constant": f"{specific_gas_constant:.3f} J/kg·K",
+#             "density": f"{density:.3f} kg/m³",
+#             "compressibility_factor": f"{compressibility_factor:.3f}",
+#             "speed_of_sound": f"{speed_of_sound:.3f} m/s",
+#             "vapor_mole_fraction": f"{vapor_mole_fraction:.3f}",
+#             "relative_humidity": f"{relative_humidity:.3f}",
+#             "dew_point": f"{dew_point:.3f} °C",
+#         }
+
+#     except ValueError as ve:
+#         logging.error(f"ValueError: {str(ve)}")
+#         raise HTTPException(status_code=400, detail=str(ve))
+#     except Exception as e:
+#         logging.error(f"Unexpected error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+
+
+
+
+
+# @app.get("/projects/{project_id}/calculated_properties")
+# async def get_calculated_properties(project_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+#     # Perform the query asynchronously
+#     stmt = (
+#         select(Project)
+#         .filter(Project.project_id == project_id)
+#         .options(
+#             selectinload(Project.cases)
+#             .selectinload(Case.calculated_properties)  # Load calculated_properties along with cases
+#         )
+#     )
+#     result = await db.execute(stmt)
+#     projects = result.scalars().all()
+
+#     response = []
+#     for project in projects:
+#         project_data = {
+#             "project_id": project.project_id,
+#             "name": project.name,
+#             "description": project.description,
+#             "cases": []
+#         }
+
+#         for case in project.cases:
+#             case_data = {
+#                 "case_id": case.case_id,
+#                 "case_number": case.case_number,
+#                 "calculated_properties": []
+#             }
+
+#             for calculated_property in case.calculated_properties:
+#                 calculated_property_data = {
+#                     "calculated_property_id": calculated_property.id,
+#                     "molar_mass": calculated_property.molar_mass,
+#                     "volumetric_flow": calculated_property.volumetric_flow,
+#                     "standard_volumetric_flow": calculated_property.standard_volumetric_flow,
+#                     "vapor_mole_fraction": calculated_property.vapor_mole_fraction,
+#                     "relative_humidity": calculated_property.relative_humidity,
+#                     "specific_heat_cp": calculated_property.specific_heat_cp,
+#                     "specific_heat_cv": calculated_property.specific_heat_cv,
+#                     "specific_heat_ratio": calculated_property.specific_heat_ratio,
+#                     "specific_gas_constant": calculated_property.specific_gas_constant,
+#                     "specific_gravity": calculated_property.specific_gravity,
+#                     "density": calculated_property.density,
+#                     "compressibility_factor": calculated_property.compressibility_factor,
+#                     "speed_of_sound": calculated_property.speed_of_sound,
+#                     "dew_point": calculated_property.dew_point
+#                 }
+#                 case_data["calculated_properties"].append(calculated_property_data)
+
+#             project_data["cases"].append(case_data)
+
+#         response.append(project_data)
+
+#     return {"projects": response}
+
+
 
