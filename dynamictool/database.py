@@ -93,23 +93,79 @@ class Case(Base):
 
 
 # # ---------------- GASES ----------------
+# class Gas(Base):
+#     __tablename__ = "gases"
+
+#     gas_id = Column(Integer, primary_key=True, index=True)
+#     name = Column(String(50), nullable=False, unique=True)
+#     molecular_weight = Column(Float, nullable=False)
+#     density = Column(Float, nullable=False)
+#     critical_pressure = Column(Float, nullable=False)
+#     critical_temperature = Column(Float, nullable=False)
+#     boiling_point = Column(Float, nullable=False)
+   
+#     toxicity = Column(Boolean, default=False)
+#     explosive = Column(Boolean, default=False)
+#     flammable = Column(Boolean, default=False)
+#     corrosive = Column(Boolean, default=False)
+#     oxidizing = Column(Boolean, default=False)
+#     sour = Column(Boolean, default=False)
+
 class Gas(Base):
     __tablename__ = "gases"
 
-    gas_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(50), nullable=False, unique=True)
-    molecular_weight = Column(Float, nullable=False)
-    density = Column(Float, nullable=False)
-    critical_pressure = Column(Float, nullable=False)
-    critical_temperature = Column(Float, nullable=False)
-    boiling_point = Column(Float, nullable=False)
-   
-    toxicity = Column(Boolean, default=False)
-    explosive = Column(Boolean, default=False)
-    flammable = Column(Boolean, default=False)
-    corrosive = Column(Boolean, default=False)
-    oxidizing = Column(Boolean, default=False)
-    sour = Column(Boolean, default=False)
+    gas_id = Column(Integer, primary_key=True)
+    
+    name = Column(String, nullable=False, unique=True)
+    molecular_weight = Column(Float, nullable=True)
+    freeze_point = Column(Float, nullable=True)
+    boiling_point = Column(Float, nullable=True)
+    critical_temperature = Column(Float, nullable=True)
+    critical_pressure = Column(Float, nullable=True)
+    critical_volume = Column(Float, nullable=True)
+    critical_compress = Column(Float, nullable=True)
+    acentric_factor = Column(Float, nullable=True)
+    liquid_density = Column(Float, nullable=True)
+    ref_temperature_for_liquid_density = Column(Float, nullable=True)
+    dipole_moment = Column(Float, nullable=True)
+
+    # Use DOUBLE PRECISION (Float in SQLAlchemy) for scientific columns
+    cpa = Column(Float, nullable=True)
+    cpb = Column(Float, nullable=True)
+    cpc = Column(Float, nullable=True)
+    cpd = Column(Float, nullable=True)
+
+    mu_b = Column(Float, nullable=True)
+    mu_c = Column(Float, nullable=True)
+    std_heat = Column(Float, nullable=True)
+    std_energy = Column(Float, nullable=True)
+
+    antoine_a = Column(Float, nullable=True)
+    antoine_b = Column(Float, nullable=True)
+    antoine_c = Column(Float, nullable=True)
+    max_vap_press = Column(Float, nullable=True)
+    min_vap_press = Column(Float, nullable=True)
+
+    harlacher_a = Column(Float, nullable=True)
+    harlacher_b = Column(Float, nullable=True)
+    harlacher_c = Column(Float, nullable=True)
+    harlacher_d = Column(Float, nullable=True)
+
+    heat_vapor = Column(Float, nullable=True)
+
+    # Boolean or nullable flags
+    toxicity = Column(Boolean, nullable=True)
+    explosive = Column(Boolean, nullable=True)
+    flammable = Column(Boolean, nullable=True)
+    corrosive = Column(Boolean, nullable=True)
+    oxidizing = Column(Boolean, nullable=True)
+    sour = Column(Boolean, nullable=True)
+
+    # Relationships
+    selected_gases = relationship("SelectedGas", back_populates="gas", cascade="all, delete")
+    selected_components = relationship("SelectedComponent", back_populates="gas", cascade="all, delete")
+    gas_compositions = relationship("GasComposition", back_populates="gas", cascade="all, delete")
+
 
 # # ---------------- INLET CONDITIONS ----------------
 class InletCondition(Base):
@@ -174,9 +230,8 @@ class SelectedGas(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, index=True)  # Assuming user selection
     gas_name = Column(String, ForeignKey("gases.name"))
-   
-    gas = relationship("Gas")
-
+    #gas = relationship("Gas")
+    gas = relationship("Gas", back_populates="selected_gases")
 #below table related to app.post("/user/component-select/", response_model=List[ComponentResponse]) 
 class SelectedComponent(Base):
     __tablename__ = "selected_component"
@@ -189,8 +244,8 @@ class SelectedComponent(Base):
 
     project = relationship("Project", back_populates="selected_components")
     case = relationship("Case", back_populates="selected_components")  
-    gas = relationship("Gas")
-
+    #gas = relationship("Gas")
+    gas = relationship("Gas", back_populates="selected_components")
 # ---------------- GAS COMPOSITION TABLE ----------------
 class GasComposition(Base):
     __tablename__ = "gas_composition"
@@ -205,8 +260,8 @@ class GasComposition(Base):
     unit = Column(Enum(UnitType), nullable=False, default=UnitType.MOL_PERCENT)  # ✅ Used Enum
     project = relationship("Project", back_populates="gas_composition")
     case = relationship("Case", back_populates="gas_compositions")  
-    gas = relationship("Gas")
-
+    #gas = relationship("Gas")
+    gas = relationship("Gas", back_populates="gas_compositions")
 class CpTable(Base):
     __tablename__ = "cp_table"
 
