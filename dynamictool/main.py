@@ -31,6 +31,8 @@ import logging
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Body
 from io import StringIO
+import numpy as np
+from scipy.optimize import fsolve
 
 # ✅ Use `lifespan` to ensure tables are created
 @asynccontextmanager
@@ -345,6 +347,71 @@ async def upload_gases(file: UploadFile = File(...), db: AsyncSession = Depends(
     await db.commit()
 
     return {"message": "Gases data uploaded successfully"}
+
+
+
+@app.post("/admin/upload-new-gases-csv/")
+async def upload_gases(file: UploadFile = File(...), db: AsyncSession = Depends(get_db),user: dict = Depends(get_current_user)):
+    try:
+        if not file.filename.endswith(".csv"):
+            raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+        
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Not authorized to add gases")
+
+        content = await file.read()
+        df = pd.read_csv(StringIO(content.decode("utf-8")))
+
+        required_columns = {
+            "name", "molecular_weight", "freeze_point", "boiling_point", "critical_temperature",
+            "critical_pressure", "critical_volume", "critical_compress", "acentric_factor",
+            "liquid_density", "ref_temperature_for_liquid_density", "dipole_moment",
+            "cpa", "cpb", "cpc", "cpd", "mu_b", "mu_c", "std_heat", "std_energy",
+            "antoine_a", "antoine_b", "antoine_c", "max_vap_press", "min_vap_press",
+            "harlacher_a", "harlacher_b", "harlacher_c", "harlacher_d", "heat_vapor",
+            "toxicity", "explosive", "flammable", "corrosive", "oxidizing", "sour"
+        }
+
+        if not required_columns.issubset(df.columns):
+            raise HTTPException(
+                status_code=400,
+                detail=f"CSV must contain the following columns: {required_columns}"
+            )
+
+        # Float conversion
+        float_columns = list(required_columns - {"name", "toxicity", "explosive", "flammable", "corrosive", "oxidizing", "sour"})
+        for col in float_columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        if df[float_columns].isnull().any().any():
+            raise HTTPException(
+                status_code=400,
+                detail="Some numeric columns contain invalid values or empty strings that could not be converted to float."
+            )
+
+        # Convert boolean flags (treat as 1/0 or true/false strings)
+        bool_columns = ["toxicity", "explosive", "flammable", "corrosive", "oxidizing", "sour"]
+        for col in bool_columns:
+            df[col] = df[col].astype(str).str.lower().map({
+                "true": True, "1": True, "yes": True,
+                "false": False, "0": False, "no": False
+            }).fillna(False)
+
+        # Convert to SQLAlchemy model instances
+        gas_records = [
+            Gas(**row.to_dict())
+            for _, row in df.iterrows()
+        ]
+
+        db.add_all(gas_records)
+        await db.commit()
+
+        return {"message": f"Successfully inserted {len(gas_records)} records into gas_properties table."}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload gas properties CSV: {str(e)}")
 
 
 @app.get("/user/projects/project_name/", response_model=list[ProjectResponse])
@@ -1070,11 +1137,8 @@ async def get_inlet_conditions(project_id: int, db: AsyncSession = Depends(get_d
 
 
 #----------------------------------------------- Selected_Component-----------------------------------
-
-
 # Initialize the Unit Registry
 ureg = pint.UnitRegistry()
-
 
 # -------------------------------------------------Functions for Calculations ----------------------------------------------------
 def convert_to_standard_units(inlet_condition):
@@ -1273,7 +1337,6 @@ def calculate_vapor_mole_fraction(gas_list, gas_compositions):
     return vapor_mole_fraction
 
 
-
 def calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list):
     """Calculate relative humidity using partial pressure of water vapor.
     Uses a lookup in gas_list (a list of tuples: (gas_id, name, molecular_weight))
@@ -1283,13 +1346,16 @@ def calculate_relative_humidity(temperature, pressure, gas_compositions, gas_lis
     # Create mapping from gas_id to gas name from the gas_list
     gas_id_to_name = {gas_id: name for gas_id, name, _ in gas_list}
     print(gas_id_to_name,"gas id to name....................")
+
+
     # Calculate partial pressure of H2O using the gas_id lookup
     p_h2o = sum(
         (gc.amount / 100) * pressure 
         for gc in gas_compositions 
-        if gas_id_to_name.get(gc.gas_id) == "H2O"
+        if gc.gas.name == "WATER"
     )
 
+    print("ph20...........",p_h2o)
     # Antoine constants for water vapor (valid for 1-100°C)
     A, B, C = 8.07131, 1730.63, 233.426
     temp_C = temperature - 273.15  # Convert Kelvin to °C
@@ -1303,6 +1369,10 @@ def calculate_relative_humidity(temperature, pressure, gas_compositions, gas_lis
 
     # Calculate relative humidity (%)
     relative_humidity = (p_h2o / p_h2o_sat) * 100 if p_h2o_sat else 0
+    print(relative_humidity)
+
+    if relative_humidity>100:
+        relative_humidity = 100
 
     return relative_humidity 
 
@@ -1325,16 +1395,6 @@ def calculate_specific_gravity(density):
     rho_air = 1.225  # kg/m³ at standard conditions
     return density / rho_air if density else 0
 
-def calculate_dew_point(temperature, relative_humidity):
-    """Calculate dew point using Magnus-Tetens approximation"""
-    if not relative_humidity:
-        return 0
-
-    A, B = 17.62, 243.12  # Constants for Magnus equation
-    alpha = math.log(relative_humidity / 100) + (A * (temperature - 273.15)) / (B + (temperature - 273.15))
-    dew_point = (B * alpha) / (A - alpha) + 273.15  # Convert back to Kelvin
-    return dew_point
-
 def calculate_cpmix(results):
     CpMix_A = 0.0
     CpMix_B = 0.0
@@ -1343,15 +1403,16 @@ def calculate_cpmix(results):
 
 
     for row in results:
-        amount = row[3] or 0.0  # Handle None
-        cp_a = row[6] or 0.0
-        cp_b = row[7] or 0.0
-        cp_c = row[8] or 0.0
-        cp_d = row[9] or 0.0
-        temp = row[10]
+        amount = row.amount or 0.0  # Handle None
+        cp_a = row.gas.cpa or 0.0
+        cp_b = row.gas.cpb or 0.0
+        cp_c = row.gas.cpc or 0.0
+        cp_d = row.gas.cpd or 0.0
+        name = row.gas.name or 0.0
+        print(cp_a,cp_b,cp_c,cp_d,amount,name)
 
         # ✅ Convert amount to mol %
-        if row[4] == UnitType.MOL_PERCENT:
+        if row.unit == UnitType.MOL_PERCENT:
             amount = amount/100
         else:
             None
@@ -1361,8 +1422,73 @@ def calculate_cpmix(results):
         CpMix_C += (amount) * cp_c
         CpMix_D += (amount) * cp_d
 
-    return  CpMix_A, CpMix_B, CpMix_C,CpMix_D,temp
+    return  CpMix_A, CpMix_B, CpMix_C,CpMix_D
+
+
+def calculate_dew_T(T, gc_results, pressure):
+    T_guess = T[0]
     
+    """
+    Calculates the difference from 1 for the summation term in the dew point equation.
+
+    Args:
+        T_guess (float): Initial temperature guess in Kelvin.
+        results (list): List of gas components with Antoine constants and amounts.
+        pressure (float): System pressure in the same units as expected for partial pressure.
+
+    Returns:
+        float: The summation term minus 1, used by fsolve to find root (dew point).
+    """
+    sum_term = 0.0
+   
+    for row in gc_results:
+        
+        # Handle potential None values robustly
+        amount = row.amount or 0.0
+        a = row.gas.antoine_a or 0.0
+        b = row.gas.antoine_b or 0.0
+        c = row.gas.antoine_c or 0.0
+
+        # Ensure a non-empty gas name (optional)
+        name = row.gas.name or "UNKNOWN"
+
+        # Calculate vapor pressure in Pa (assuming Antoine's constants are for mmHg)
+        try:
+            p_vap = np.exp(a - b / (T_guess + c)) * 133.3223684  # mmHg to Pa
+           
+            
+        except Exception as e:
+            print(f"Error computing vapor pressure for {name}: {e}")
+            p_vap = 1e-5  # Avoid divide-by-zero
+            
+            
+        # Normalize amount to mole fraction
+        if row.unit == UnitType.MOL_PERCENT:
+            amount = amount / 100.0
+            
+
+        pi = amount * pressure
+
+        # Protect against divide-by-zero
+        if pi == 0:
+            print(f"Warning: Skipping component {name} due to zero pi")
+            continue
+
+        ki = p_vap / pi
+        sum_term += amount / ki
+        print("Amount:",amount, "name:",name,"ki",ki, "sum_term",sum_term,"pi",pi,'t guess:',T_guess)
+    #print("Pausing here... press Enter to continue.")
+    #input()
+    return sum_term - 1.0
+
+def calculate_dew_point(gc_results, pressure):
+    
+    T_guess = np.array([60 + 273.15])  # Better to use 273.15 for precision
+    print(T_guess)  
+    t_dew = fsolve(calculate_dew_T, T_guess[0], args=(gc_results, pressure))
+    return t_dew[0]
+
+
 
 @app.put("/projects/{project_id}/cases/{case_id}/calculate/")
 async def calculate_properties(
@@ -1378,36 +1504,9 @@ async def calculate_properties(
             .options(joinedload(GasComposition.gas))
             .filter_by(project_id=project_id, case_id=case_id)
         )
-        gas_compositions = gas_compositions_result.scalars().all()
-
-        stmt = (
-                    select(
-                        GasComposition.project_id,
-                        GasComposition.case_id,
-                        GasComposition.gas_id,
-                        GasComposition.amount,
-                        GasComposition.unit,
-                        Gas.name.label("gas_name"),
-                        CpTable.CpA,
-                        CpTable.CpB,
-                        CpTable.CpC,
-                        CpTable.CpD,
-                        InletCondition.temperature
-                    )
-                    .join(Gas, GasComposition.gas_id == Gas.gas_id)
-                    .join(CpTable, Gas.name == CpTable.name)
-                    .join(InletCondition, 
-                        (InletCondition.project_id == GasComposition.project_id) &
-                        (InletCondition.case_id == GasComposition.case_id)
-                    )
-                    .where(
-                        GasComposition.project_id == project_id,
-                        GasComposition.case_id == case_id
-                    )
-                )
-
-        result = await db.execute(stmt)
-        rows = result.fetchall()
+        #gas_compositions = gas_compositions_result.scalars().all()
+        gas_compositions = gas_compositions_result.scalars().fetchall()
+        print(gas_compositions)
 
 
         if not gas_compositions:
@@ -1435,11 +1534,12 @@ async def calculate_properties(
 
         if pressure == 0 or temperature == 0:
             raise HTTPException(status_code=400, detail="Critical values like pressure, temperature, or flow rate are zero")
-
+        print("pressure:.............",pressure,' Temp:',temperature)
+        print("pressure:.............",ambient_pressure,' Temp:',ambient_temperature)
         # Calculations
-
-        cpmixa,cpmixb,cpmixc,cpmixd,temp = calculate_cpmix(rows)
-        print(cpmixa,cpmixb,cpmixc,cpmixd,temp)
+        # cpmixa,cpmixb,cpmixc,cpmixd,temp = calculate_cpmix_al_in_1(gas_compositions,temperature)
+        cpmixa,cpmixb,cpmixc,cpmixd = calculate_cpmix(gas_compositions)
+        print(cpmixa,cpmixb,cpmixc,cpmixd)
 
         molar_mass = round(calculate_molar_mass(gas_compositions, gas_list), 3)
 
@@ -1448,9 +1548,10 @@ async def calculate_properties(
         standard_volumetric_flow, specific_gas_constant, density, compressibility_factor,  = \
             calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure)
         
+        temp = temperature
         cpmix = (cpmixa+cpmixb*temp+cpmixc*(temp**2)+cpmixd*(temp**3))*4.189/molar_mass #j/kgK
-        cvmix = round(cpmix-specific_gas_constant,3)
-        k=round(cpmix/cvmix,3)
+        cvmix = cpmix-specific_gas_constant
+        k=cpmix/cvmix
 
         speed_of_sound = (k * specific_gas_constant * temperature) ** 0.5
         speed_of_sound = round(speed_of_sound, 3)
@@ -1463,11 +1564,14 @@ async def calculate_properties(
         density = round((pressure * molar_mass) / (specific_gas_constant * temperature),6)
 
         relative_humidity = round(calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list), 3)
-        dew_point = round(calculate_dew_point(temperature, relative_humidity), 3)
-        print("Important details--------------------------------",density,specific_gas_constant ,temperature,molar_mass)
-        specific_gravity = round(molar_mass / 28.97, 3)
-
-
+        #dew_point = round(calculate_dew_point(temperature, relative_humidity), 3)
+        #dew_T = calculate_dew_T(gas_compositions, temperature, pressure)
+        print(gas_compositions,"gas_compositionss it is calling from endpoint")
+        dew_point = calculate_dew_point(gas_compositions, pressure)
+        print("test cases gases and its ")
+        print(gas_compositions)
+        # print("Important details--------------------------------",density,specific_gas_constant ,temperature,molar_mass)
+        specific_gravity = round(molar_mass*1000 / 28.964, 3)
 
 
         # Update or insert
@@ -1516,6 +1620,7 @@ async def calculate_properties(
 
         return {
             "message": "Calculated properties updated",
+             "Gas_Composition":gas_compositions,
             "molar_mass": f"{molar_mass:.3f} kg/mol",
             "volumetric_flow": f"{volumetric_flow:.3f} m³/h",
             "standard_volumetric_flow": f"{standard_volumetric_flow:.3f} m³/h",
@@ -1525,7 +1630,7 @@ async def calculate_properties(
             "speed_of_sound": f"{speed_of_sound:.3f} m/s",
             "vapor_mole_fraction": f"{vapor_mole_fraction:.3f}",
             "relative_humidity": f"{relative_humidity:.3f}",
-            "dew_point": f"{dew_point:.3f} °C",
+             "dew_point": f"{dew_point:.3f} ",
             "Cp":f"{cpmix:.3f} J/kg-K",
             "Cv":f"{cvmix:.3f} J/kg-K",
             "k":f"{k:.3f} J/kg-K",
@@ -1537,6 +1642,13 @@ async def calculate_properties(
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+
+
+
+
+
+
 
 
 @app.get("/projects/{project_id}/calculated_properties")
