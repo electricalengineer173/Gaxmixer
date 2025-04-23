@@ -456,19 +456,34 @@ async def create_project(
     return new_project  # No gases yet!
 
 
+# @app.get("/gases/")
+# async def get_all_gases(
+#     db: AsyncSession = Depends(get_db),
+#     limit: int = Query(130, ge=1, le=500),
+#     user: dict = Depends(get_current_user),
+# ):
+#     result = await db.execute(select(Gas).limit(limit))  
+#     gases = result.scalars().all()
+
+#     if not gases:
+#         raise HTTPException(status_code=404, detail="No gases found")
+
+#     return gases  # Pydantic will convert SQLAlchemy objects automatically
+
+
 @app.get("/gases/")
 async def get_all_gases(
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(130, ge=1, le=500),
     user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(Gas).limit(limit))  
+    result = await db.execute(select(Gas))  # Removed .limit(limit)
     gases = result.scalars().all()
 
     if not gases:
         raise HTTPException(status_code=404, detail="No gases found")
 
-    return gases  # Pydantic will convert SQLAlchemy objects automatically
+    return gases
+
 
 
 @app.post("/user/projects/{project_id}/select-gases/")
