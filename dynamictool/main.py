@@ -1314,7 +1314,7 @@ def calculate_additional_properties(volumetric_flow, molar_mass, temperature, pr
     R_gas = R / molar_mass
 
     # Density (kg/m³)
-    density = pressure / (R_gas * temperature)
+    #density = pressure / (R_gas * temperature)
 
     # Compressibility Factor (Z) (Ideal Gas)
     Z = 1.0  
@@ -1322,7 +1322,7 @@ def calculate_additional_properties(volumetric_flow, molar_mass, temperature, pr
     # Speed of Sound (m/s)
     #speed_of_sound = (gamma * R_gas * temperature) ** 0.5
 
-    return standard_volumetric_flow, R_gas, density, Z
+    return standard_volumetric_flow, R_gas,  Z
 
 def calculate_vapor_mole_fraction(gas_list, gas_compositions):
     """Calculate vapor mole fraction (e.g., for water vapor)"""
@@ -1545,7 +1545,7 @@ async def calculate_properties(
 
         volumetric_flow = round(calculate_volumetric_flow(inlet_condition, molar_mass, temperature, pressure), 3)
 
-        standard_volumetric_flow, specific_gas_constant, density, compressibility_factor,  = \
+        standard_volumetric_flow, specific_gas_constant, compressibility_factor,  = \
             calculate_additional_properties(volumetric_flow, molar_mass, temperature, pressure)
         
         temp = temperature
@@ -1561,8 +1561,8 @@ async def calculate_properties(
         
         vapor_mole_fraction = round(calculate_vapor_mole_fraction(gas_list, gas_compositions), 3)
 
-        density = round((pressure * molar_mass) / (specific_gas_constant * temperature),6)
-
+        #density = round((pressure * molar_mass) / (specific_gas_constant * temperature),6)
+        density = round(pressure/ (specific_gas_constant*temperature),6)
         relative_humidity = round(calculate_relative_humidity(temperature, pressure, gas_compositions, gas_list), 3)
         #dew_point = round(calculate_dew_point(temperature, relative_humidity), 3)
         #dew_T = calculate_dew_T(gas_compositions, temperature, pressure)
